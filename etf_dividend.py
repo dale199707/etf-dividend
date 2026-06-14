@@ -55,18 +55,41 @@ def _merge_div(result, code, ex_date, cash, cash_pending, name):
         {"ex_date": ex_date, "cash": cash, "pending": cash_pending})
 
 def fetch_twse_dividends(result):
-    """TWSE 除權除息預告表（TWT48U），回傳當期所有即將/近期除息的 ETF 與個股。
-    涵蓋上市 ETF 與債券 ETF（00xxxB）。此端點僅回當期預告，無歷史。"""
-    url = "https://www.twse.com.tw/exchangeReport/TWT48U?response=json"
-    try:
-        data = fetch_json(url)
-    except Exception as e:
-        print(f"[warn] TWSE 預告表失敗: {e}", file=sys.stderr)
+    """TWSE 除權除息預告表（TWT48U）。嘗試多個端點與完整標頭，
+    並在抓不到時印出 raw 回傳以利診斷。"""
+    endpoints = [
+        "https://www.twse.com.tw/rwd/zh/exRight/TWT48U?response=json",
+        "https://www.twse.com.tw/exchangeReport/TWT48U?response=json",
+    ]
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/124.0 Safari/537.36"),
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://www.twse.com.tw/zh/announcement/ex-right/twt48u.html",
+        "Accept-Language": "zh-TW,zh;q=0.9",
+    }
+    data = None
+    for url in endpoints:
+        try:
+            req = Request(url, headers=headers)
+            raw = urlopen(req, timeout=30).read().decode("utf-8")
+            data = json.loads(raw)
+            if data.get("stat") == "OK" and data.get("data"):
+                print(f"[info] TWSE 端點成功: {url}", file=sys.stderr)
+                break
+            else:
+                print(f"[info] TWSE {url} stat={data.get('stat')} "
+                      f"data筆數={len(data.get('data',[]))} "
+                      f"raw前200={raw[:200]}", file=sys.stderr)
+        except Exception as e:
+            print(f"[warn] TWSE {url} 失敗: {e}", file=sys.stderr)
+    if not data or not data.get("data"):
+        print("[warn] TWSE 所有端點皆無資料", file=sys.stderr)
         return
-    if data.get("stat") != "OK":
-        print(f"[info] TWSE stat={data.get('stat')}", file=sys.stderr)
-        return
+
     fields = data.get("fields", [])
+    print(f"[info] TWSE fields: {fields}", file=sys.stderr)
     idx = {name: i for i, name in enumerate(fields)}
     def col(row, *keys):
         for k in keys:
