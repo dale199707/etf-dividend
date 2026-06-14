@@ -72,6 +72,22 @@
 <script type="text/babel">
 const {useState,useEffect,useCallback} = React;
 
+// ===== 常見台股 ETF 代號→名稱對照表 =====
+const ETF_NAMES = {
+  "0050":"元大台灣50","006208":"富邦台50","0051":"元大中型100",
+  "0056":"元大高股息","00713":"元大台灣高息低波","00701":"國泰股利精選30",
+  "00730":"富邦台灣優質高息","00731":"FH富時高息低波","00878":"國泰永續高股息",
+  "00900":"富邦特選高股息30","00907":"永豐優息存股","00915":"凱基優選高股息30",
+  "00918":"大華優利高填息30","00919":"群益台灣精選高息","00929":"復華台灣科技優息",
+  "00930":"永豐ESG低碳高息","00932":"兆豐永續高息等權","00934":"中信成長高股息",
+  "00936":"台新永續高息中小","00939":"統一台灣高息動能","00940":"元大臺灣價值高息",
+  "00943":"兆豐電子高息等權","00944":"野村趨勢動能高息","00946":"群益科技高息成長",
+  "00961":"FT臺灣永續高息","00962":"台新AI優息動能",
+  "00692":"富邦公司治理","00850":"元大臺灣ESG永續","00881":"國泰台灣5G+",
+  "00891":"中信關鍵半導體","00892":"富邦台灣半導體","006205":"富邦上証",
+  "0052":"富邦科技","0053":"元大電子","00757":"統一FANG+","00646":"元大S&P500",
+};
+
 // ===== 設定（存 localStorage，不進 repo）=====
 const LS = {
   get:(k,d)=>{try{return JSON.parse(localStorage.getItem("etf_"+k))??d}catch{return d}},
@@ -127,8 +143,10 @@ function App(){
 
   const add=()=>{
     if(!form.code||!form.shares){flash("請填代號與股數",true);return}
+    const code=form.code.trim();
+    const name=form.name.trim() || ETF_NAMES[code] || "";
     setHoldings(h=>[...h,{
-      code:form.code.trim(),name:form.name.trim(),
+      code,name,
       shares:Number(form.shares),avg_cost:Number(form.avg_cost)||0
     }]);
     setForm({code:"",name:"",shares:"",avg_cost:""});
@@ -201,7 +219,8 @@ function App(){
         <div className="row">
           <div><label>代號</label><input value={form.code} placeholder="0056"
             onChange={e=>setForm({...form,code:e.target.value})}/></div>
-          <div><label>名稱（可空）</label><input value={form.name} placeholder="元大高股息"
+          <div><label>名稱（可空，自動帶入）</label><input value={form.name}
+            placeholder={ETF_NAMES[form.code.trim()] || "元大高股息"}
             onChange={e=>setForm({...form,name:e.target.value})}/></div>
           <div><label>股數</label><input value={form.shares} inputMode="numeric" placeholder="5000"
             onChange={e=>setForm({...form,shares:e.target.value})}/></div>

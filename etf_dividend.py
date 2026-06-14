@@ -127,7 +127,7 @@ def build_report(holdings, div_map):
     upcoming.sort(key=lambda x: x["ex_date"])
     return this_month, upcoming
 
-def format_message(this_month, upcoming):
+def format_message(this_month, upcoming, holdings):
     today = dt.date.today()
     lines = [f"📅 *ETF 配息追蹤* ({today:%Y/%m/%d})", ""]
 
@@ -158,6 +158,21 @@ def format_message(this_month, upcoming):
             )
     else:
         lines.append("🔔 近期無預告除息")
+
+    # 持股清單（無論有無配息都附上）
+    if holdings:
+        lines.append("")
+        lines.append("📦 *目前持股*")
+        total_cost = 0
+        for h in holdings:
+            cost = h["shares"] * h.get("avg_cost", 0)
+            total_cost += cost
+            nm = h.get("name", "")
+            lines.append(
+                f"  {h['code']} {nm}｜{h['shares']:,} 股"
+                f"（均價 {h.get('avg_cost',0):.2f}）"
+            )
+        lines.append(f"\n  總成本：{total_cost:,.0f} 元")
 
     return "\n".join(lines)
 
@@ -212,7 +227,7 @@ def main():
     div_map = fetch_twse_dividends()
     print(f"取得除權息資料 {len(div_map)} 檔")
     this_month, upcoming = build_report(holdings, div_map)
-    msg = format_message(this_month, upcoming)
+    msg = format_message(this_month, upcoming, holdings)
     send_telegram(msg)
     write_result(this_month, upcoming)
 
