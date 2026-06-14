@@ -68,10 +68,10 @@ def _merge_div(result, code, ex_date, cash, name):
     result[code]["records"].append({"ex_date": ex_date, "cash": cash})
 
 def fetch_twse_dividends(result, months):
-    """TWSE 除權除息計算結果表（TWT49U），上市 ETF/個股"""
+    """TWSE 除權除息預告表（TWT48U），涵蓋 ETF/受益證券，含實際配息金額"""
     for y, m in months:
-        url = ("https://www.twse.com.tw/rwd/zh/exRight/TWT49U?"
-               + urlencode({"startDate": f"{y}{m:02d}01",
+        url = ("https://www.twse.com.tw/exchangeReport/TWT48U?"
+               + urlencode({"strDate": f"{y}{m:02d}01",
                             "endDate": f"{y}{m:02d}31", "response": "json"}))
         try:
             data = fetch_json(url)
@@ -79,27 +79,32 @@ def fetch_twse_dividends(result, months):
             print(f"[warn] TWSE {y}/{m} 失敗: {e}", file=sys.stderr)
             continue
         if data.get("stat") != "OK":
+            print(f"[info] TWSE {y}/{m} stat={data.get('stat')}", file=sys.stderr)
             continue
-        idx = {name: i for i, name in enumerate(data.get("fields", []))}
+        fields = data.get("fields", [])
+        idx = {name: i for i, name in enumerate(fields)}
         def col(row, *keys):
             for k in keys:
                 for fname, i in idx.items():
                     if k in fname:
                         return row[i]
             return ""
+        cnt = 0
         for row in data.get("data", []):
-            code = str(col(row, "股票代號", "代號")).strip()
-            ex_date = roc_to_ad(col(row, "除權息日期", "資料日期", "除息日期"))
-            cash = to_float(col(row, "現金股利", "權值+息值", "息值"))
-            name = str(col(row, "股票名稱", "名稱")).strip()
-            _merge_div(result, code, ex_date, cash, name)
+            code = str(col(row, "股票代號", "證券代號", "代號")).strip()
+            ex_date = roc_to_ad(col(row, "除權息日期", "除息日期", "資料日期"))
+            cash = to_float(col(row, "現金股利", "現金股利-合計", "息值"))
+            name = str(col(row, "股票名稱", "證券名稱", "名稱")).strip()
+            if code and ex_date:
+                _merge_div(result, code, ex_date, cash, name)
+                cnt += 1
+        print(f"[info] TWSE {y}/{m}: {cnt} 筆", file=sys.stderr)
 
 def fetch_tpex_dividends(result, months):
-    """TPEx 櫃買除權息，債券 ETF（代號結尾 B）在此掛牌
-    端點：上櫃股票除權除息預告表 / 計算結果"""
+    """TPEx 櫃買除權息，債券 ETF（代號結尾 B）在此掛牌。
+    端點格式待實測，失敗不影響上市 ETF。"""
     for y, m in months:
         roc_y = y - 1911
-        # 櫃買除權息 API（民國年月）
         url = ("https://www.tpex.org.tw/www/zh-tw/bond/exDayAndStib?"
                + urlencode({"date": f"{roc_y}/{m:02d}", "response": "json"}))
         data = None
@@ -109,14 +114,18 @@ def fetch_tpex_dividends(result, months):
             print(f"[warn] TPEx {y}/{m} 失敗: {e}", file=sys.stderr)
         if not data:
             continue
-        rows = data.get("aaData") or data.get("data") or []
+        rows = data.get("aaData") or data.get("data") or data.get("tables", [{}])[0].get("data", [])
+        cnt = 0
         for row in rows:
             if not isinstance(row, (list, tuple)) or len(row) < 3:
                 continue
             code = str(row[0]).strip()
-            ex_date = roc_to_ad(row[1]) if len(row) > 1 else None
-            cash = to_float(row[2]) if len(row) > 2 else 0.0
-            _merge_div(result, code, ex_date, cash, "")
+            ex_date = roc_to_ad(row[1])
+            cash = to_float(row[2])
+            if code and ex_date:
+                _merge_div(result, code, ex_date, cash, "")
+                cnt += 1
+        print(f"[info] TPEx {y}/{m}: {cnt} 筆", file=sys.stderr)
 
 def fetch_dividends():
     """合併 TWSE + TPEx，回傳 code -> {name, records:[{ex_date,cash}]}"""

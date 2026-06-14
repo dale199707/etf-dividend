@@ -126,7 +126,6 @@ function App(){
   const [cfg,setCfg]=useState(()=>LS.get("cfg",{owner:"dale199707",repo:"etf-dividend",branch:"main",token:""}));
   const [holdings,setHoldings]=useState([]);
   const [sha,setSha]=useState(null);
-  const [result,setResult]=useState(null);
   const [form,setForm]=useState({code:"",name:"",shares:"",avg_cost:""});
   const [toast,setToast]=useState(null);
   const [loading,setLoading]=useState(false);
@@ -141,7 +140,6 @@ function App(){
     try{
       const h=await ghGet(cfg,"holdings.json");
       setHoldings(h.data?.holdings||[]); setSha(h.sha); setDirty(false);
-      try{const r=await ghGet(cfg,"last_result.json");setResult(r.data)}catch{}
     }catch(e){flash(e.message,true)}
     setLoading(false);
   },[cfg]);
@@ -184,53 +182,6 @@ function App(){
           {loading?"載入中…":"重新整理"}
         </button>
       </header>
-
-      {result && (
-        <div className="card">
-          <h2>最新配息結果</h2>
-          <div className="sub" style={{marginBottom:8}}>更新於 {result.generated_at||"—"}</div>
-          {(result.this_month||[]).length>0 ? (
-            <div>
-              {result.this_month.map((r,i)=>(
-                <div className="divrow" key={i}>
-                  <div><span className="code">{r.code}</span> <span className="nm">{r.name}</span><br/>
-                    <span className="nm">除息 {r.ex_date}｜每股 {r.cash_per_share} 元</span></div>
-                  <div style={{textAlign:"right"}} className="num">
-                    <div style={{fontWeight:700}}>{fmt(r.total)} 元</div>
-                    <div className="nm">{(r.single_yield||0).toFixed(2)}%</div>
-                  </div>
-                </div>
-              ))}
-              <div style={{marginTop:12,textAlign:"right"}}>
-                <span className="nm">本月合計</span><br/>
-                <span className="big">{fmt(result.month_total)} 元</span>
-              </div>
-            </div>
-          ):<div className="empty">本月無除息紀錄</div>}
-          {(result.upcoming||[]).length>0 && (
-            <div style={{marginTop:14}}>
-              <div className="nm" style={{marginBottom:6}}>🔔 即將除息</div>
-              {result.upcoming.map((r,i)=>(
-                <div className="divrow" key={i}>
-                  <div><span className="code">{r.code}</span> <span className="nm">{r.name}</span></div>
-                  <div className="nm num">{r.ex_date}（剩 {r.days_left} 天）約 {fmt(r.est)} 元</div>
-                </div>
-              ))}
-            </div>
-          )}
-          {(result.recent||[]).length>0 && (
-            <div style={{marginTop:14}}>
-              <div className="nm" style={{marginBottom:6}}>🗓 最近一次除息</div>
-              {result.recent.map((r,i)=>(
-                <div className="divrow" key={i}>
-                  <div><span className="code">{r.code}</span> <span className="nm">{r.name}</span></div>
-                  <div className="nm num">{r.ex_date}｜每股 {r.cash_per_share} 元 → {fmt(r.total)} 元</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       <div className="card">
         <h2>新增持股</h2>
