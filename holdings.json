@@ -35,6 +35,12 @@
       "name": "",
       "shares": 1000,
       "avg_cost": 10
+    },
+    {
+      "code": "00712",
+      "name": "",
+      "shares": 1000,
+      "avg_cost": 10
     }
   ]
 }
