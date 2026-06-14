@@ -1,8 +1,40 @@
 {
-  "_說明": "shares=持有股數, avg_cost=買入均價(元/股)。代號用純數字字串。",
   "holdings": [
-    { "code": "0056", "name": "元大高股息",       "shares": 5000, "avg_cost": 35.2 },
-    { "code": "00878", "name": "國泰永續高股息",   "shares": 8000, "avg_cost": 20.1 },
-    { "code": "00919", "name": "群益台灣精選高息", "shares": 3000, "avg_cost": 23.5 }
+    {
+      "code": "0056",
+      "name": "元大高股息",
+      "shares": 5000,
+      "avg_cost": 35.2
+    },
+    {
+      "code": "00878",
+      "name": "國泰永續高股息",
+      "shares": 8000,
+      "avg_cost": 20.1
+    },
+    {
+      "code": "00919",
+      "name": "群益台灣精選高息",
+      "shares": 3000,
+      "avg_cost": 23.5
+    },
+    {
+      "code": "00713",
+      "name": "",
+      "shares": 1000,
+      "avg_cost": 10
+    },
+    {
+      "code": "00929",
+      "name": "",
+      "shares": 1000,
+      "avg_cost": 10
+    },
+    {
+      "code": "00940",
+      "name": "",
+      "shares": 1000,
+      "avg_cost": 10
+    }
   ]
 }
