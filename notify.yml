@@ -1,0 +1,31 @@
+name: ETF Dividend Notify
+
+on:
+  schedule:
+    # UTC 01:00 = 台灣時間 09:00，每月 5 號執行
+    - cron: "0 1 5 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write          # 允許 commit 回 last_result.json
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run ETF dividend tracker
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python etf_dividend.py
+      - name: Commit result
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add last_result.json
+          git diff --staged --quiet || git commit -m "update last_result [skip ci]"
+          git push

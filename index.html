@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>ETF 配息追蹤</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d212b; --line:#272c38;
+    --ink:#e8eaf0; --muted:#8b93a7; --accent:#3ddc97; --accent-dim:#1f8a5f;
+    --gain:#3ddc97; --warn:#f5b14c; --danger:#f06d6d;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"Noto Sans TC",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+  }
+  .wrap{max-width:760px;margin:0 auto;padding:20px 16px 80px}
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:8px 0 20px}
+  h1{font-size:22px;font-weight:700;letter-spacing:-.02em;margin:0}
+  .sub{color:var(--muted);font-size:13px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+  .card h2{font-size:14px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin:0 0 12px}
+  label{display:block;font-size:12px;color:var(--muted);margin:0 0 4px}
+  input{
+    width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+    border-radius:9px;padding:10px 12px;font-size:15px;font-family:inherit;
+  }
+  input:focus{outline:none;border-color:var(--accent-dim)}
+  .row{display:grid;grid-template-columns:1fr 1.4fr 1fr 1fr auto;gap:8px;align-items:end}
+  @media(max-width:560px){.row{grid-template-columns:1fr 1fr;}}
+  .btn{
+    background:var(--accent);color:#06281b;border:none;border-radius:9px;
+    padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+  .btn.sm{padding:7px 11px;font-size:13px}
+  .btn.danger{background:transparent;border:1px solid var(--danger);color:var(--danger)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;color:var(--muted);font-weight:500;font-size:12px;padding:8px 8px;border-bottom:1px solid var(--line)}
+  td{padding:11px 8px;border-bottom:1px solid var(--line)}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  .code{font-weight:700}
+  .nm{color:var(--muted);font-size:12px}
+  .empty{color:var(--muted);text-align:center;padding:24px 0;font-size:14px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px}
+  .pill{font-size:12px;padding:4px 10px;border-radius:20px;background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
+  .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--panel2);
+    border:1px solid var(--line);color:var(--ink);padding:11px 18px;border-radius:10px;font-size:14px;
+    box-shadow:0 8px 30px rgba(0,0,0,.5);z-index:50}
+  .toast.err{border-color:var(--danger)}
+  .divrow{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)}
+  .divrow:last-child{border-bottom:none}
+  .big{font-size:26px;font-weight:700;color:var(--gain);font-variant-numeric:tabular-nums}
+  details{margin-top:10px}
+  summary{cursor:pointer;color:var(--muted);font-size:13px}
+  .cfg{display:grid;gap:10px;margin-top:10px}
+  a{color:var(--accent)}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback} = React;
+
+// ===== 設定（存 localStorage，不進 repo）=====
+const LS = {
+  get:(k,d)=>{try{return JSON.parse(localStorage.getItem("etf_"+k))??d}catch{return d}},
+  set:(k,v)=>localStorage.setItem("etf_"+k,JSON.stringify(v)),
+};
+
+function fmt(n,d=0){return (n||0).toLocaleString("zh-TW",{minimumFractionDigits:d,maximumFractionDigits:d})}
+
+// ===== GitHub API =====
+async function ghGet(cfg,path){
+  const url=`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${path}?ref=${cfg.branch}`;
+  const r=await fetch(url,{headers:cfg.token?{Authorization:`token ${cfg.token}`}:{}});
+  if(r.status===404) return {data:null,sha:null};
+  if(!r.ok) throw new Error(`讀取失敗 ${r.status}`);
+  const j=await r.json();
+  return {data:JSON.parse(decodeURIComponent(escape(atob(j.content)))),sha:j.sha};
+}
+async function ghPut(cfg,path,obj,sha,msg){
+  const url=`https://api.github.com/repos/${cfg.owner}/${cfg.repo}/contents/${path}`;
+  const content=btoa(unescape(encodeURIComponent(JSON.stringify(obj,null,2))));
+  const body={message:msg,content,branch:cfg.branch};
+  if(sha) body.sha=sha;
+  const r=await fetch(url,{method:"PUT",headers:{Authorization:`token ${cfg.token}`,"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!r.ok){const e=await r.json();throw new Error(e.message||`寫入失敗 ${r.status}`)}
+  return (await r.json()).content.sha;
+}
+
+function App(){
+  const [cfg,setCfg]=useState(()=>LS.get("cfg",{owner:"dale199707",repo:"etf-dividend",branch:"main",token:""}));
+  const [holdings,setHoldings]=useState([]);
+  const [sha,setSha]=useState(null);
+  const [result,setResult]=useState(null);
+  const [form,setForm]=useState({code:"",name:"",shares:"",avg_cost:""});
+  const [toast,setToast]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const [dirty,setDirty]=useState(false);
+
+  const flash=(m,err)=>{setToast({m,err});setTimeout(()=>setToast(null),2600)};
+  const saveCfg=c=>{setCfg(c);LS.set("cfg",c)};
+
+  const load=useCallback(async()=>{
+    if(!cfg.owner||!cfg.repo){return}
+    setLoading(true);
+    try{
+      const h=await ghGet(cfg,"holdings.json");
+      setHoldings(h.data?.holdings||[]); setSha(h.sha); setDirty(false);
+      try{const r=await ghGet(cfg,"last_result.json");setResult(r.data)}catch{}
+    }catch(e){flash(e.message,true)}
+    setLoading(false);
+  },[cfg]);
+
+  useEffect(()=>{load()},[]);
+
+  const add=()=>{
+    if(!form.code||!form.shares){flash("請填代號與股數",true);return}
+    setHoldings(h=>[...h,{
+      code:form.code.trim(),name:form.name.trim(),
+      shares:Number(form.shares),avg_cost:Number(form.avg_cost)||0
+    }]);
+    setForm({code:"",name:"",shares:"",avg_cost:""});
+    setDirty(true);
+  };
+  const del=i=>{setHoldings(h=>h.filter((_,j)=>j!==i));setDirty(true)};
+
+  const save=async()=>{
+    if(!cfg.token){flash("請先在下方設定填入 GitHub Token",true);return}
+    setLoading(true);
+    try{
+      const newSha=await ghPut(cfg,"holdings.json",{holdings},sha,"update holdings via web");
+      setSha(newSha);setDirty(false);flash("已儲存到 GitHub ✓");
+    }catch(e){flash(e.message,true)}
+    setLoading(false);
+  };
+
+  const totalCost=holdings.reduce((s,h)=>s+h.shares*h.avg_cost,0);
+
+  return (
+    <div className="wrap">
+      <header>
+        <div>
+          <h1>ETF 配息追蹤</h1>
+          <div className="sub">{cfg.owner}/{cfg.repo}</div>
+        </div>
+        <button className="btn ghost sm" onClick={load} disabled={loading}>
+          {loading?"載入中…":"重新整理"}
+        </button>
+      </header>
+
+      {result && (
+        <div className="card">
+          <h2>最新配息結果</h2>
+          <div className="sub" style={{marginBottom:8}}>更新於 {result.generated_at||"—"}</div>
+          {(result.this_month||[]).length>0 ? (
+            <div>
+              {result.this_month.map((r,i)=>(
+                <div className="divrow" key={i}>
+                  <div><span className="code">{r.code}</span> <span className="nm">{r.name}</span><br/>
+                    <span className="nm">除息 {r.ex_date}｜每股 {r.cash_per_share} 元</span></div>
+                  <div style={{textAlign:"right"}} className="num">
+                    <div style={{fontWeight:700}}>{fmt(r.total)} 元</div>
+                    <div className="nm">{(r.single_yield||0).toFixed(2)}%</div>
+                  </div>
+                </div>
+              ))}
+              <div style={{marginTop:12,textAlign:"right"}}>
+                <span className="nm">本月合計</span><br/>
+                <span className="big">{fmt(result.month_total)} 元</span>
+              </div>
+            </div>
+          ):<div className="empty">本月無除息紀錄</div>}
+          {(result.upcoming||[]).length>0 && (
+            <div style={{marginTop:14}}>
+              <div className="nm" style={{marginBottom:6}}>🔔 即將除息</div>
+              {result.upcoming.map((r,i)=>(
+                <div className="divrow" key={i}>
+                  <div><span className="code">{r.code}</span> <span className="nm">{r.name}</span></div>
+                  <div className="nm num">{r.ex_date}（剩 {r.days_left} 天）約 {fmt(r.est)} 元</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="card">
+        <h2>新增持股</h2>
+        <div className="row">
+          <div><label>代號</label><input value={form.code} placeholder="0056"
+            onChange={e=>setForm({...form,code:e.target.value})}/></div>
+          <div><label>名稱（可空）</label><input value={form.name} placeholder="元大高股息"
+            onChange={e=>setForm({...form,name:e.target.value})}/></div>
+          <div><label>股數</label><input value={form.shares} inputMode="numeric" placeholder="5000"
+            onChange={e=>setForm({...form,shares:e.target.value})}/></div>
+          <div><label>均價</label><input value={form.avg_cost} inputMode="decimal" placeholder="35.2"
+            onChange={e=>setForm({...form,avg_cost:e.target.value})}/></div>
+          <button className="btn" onClick={add}>新增</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>目前持股</h2>
+        {holdings.length===0 ? <div className="empty">尚未填入持股</div> : (
+          <table>
+            <thead><tr>
+              <th>代號</th><th>名稱</th><th className="num">股數</th>
+              <th className="num">均價</th><th className="num">成本</th><th></th>
+            </tr></thead>
+            <tbody>
+              {holdings.map((h,i)=>(
+                <tr key={i}>
+                  <td className="code">{h.code}</td>
+                  <td className="nm">{h.name||"—"}</td>
+                  <td className="num">{fmt(h.shares)}</td>
+                  <td className="num">{fmt(h.avg_cost,2)}</td>
+                  <td className="num">{fmt(h.shares*h.avg_cost)}</td>
+                  <td style={{textAlign:"right"}}>
+                    <button className="btn danger sm" onClick={()=>del(i)}>刪</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <div className="bar">
+          <span className="pill">{holdings.length} 檔</span>
+          <span className="pill">總成本 {fmt(totalCost)} 元</span>
+          <div style={{flex:1}}/>
+          <button className="btn" onClick={save} disabled={loading||!dirty}>
+            {dirty?"儲存到 GitHub":"已是最新"}
+          </button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>設定</h2>
+        <details open={!cfg.token}>
+          <summary>GitHub 連線設定（需填一次 Token）</summary>
+          <div className="cfg">
+            <div><label>Owner（你的 GitHub 帳號）</label>
+              <input value={cfg.owner} onChange={e=>saveCfg({...cfg,owner:e.target.value})}/></div>
+            <div><label>Repo 名稱</label>
+              <input value={cfg.repo} onChange={e=>saveCfg({...cfg,repo:e.target.value})}/></div>
+            <div><label>Branch</label>
+              <input value={cfg.branch} onChange={e=>saveCfg({...cfg,branch:e.target.value})}/></div>
+            <div><label>Personal Access Token（fine-grained，給此 repo 的 Contents 讀寫權）</label>
+              <input type="password" value={cfg.token} placeholder="github_pat_..."
+                onChange={e=>saveCfg({...cfg,token:e.target.value})}/></div>
+            <div className="hint">
+              Token 只存在這台裝置的瀏覽器，不會上傳。
+              建立：GitHub → Settings → Developer settings → Fine-grained tokens →
+              指定此 repo，Repository permissions 的 Contents 設為 Read and write。
+            </div>
+          </div>
+        </details>
+      </div>
+
+      {toast && <div className={"toast"+(toast.err?" err":"")}>{toast.m}</div>}
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
