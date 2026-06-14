@@ -86,6 +86,13 @@ const ETF_NAMES = {
   "00692":"富邦公司治理","00850":"元大臺灣ESG永續","00881":"國泰台灣5G+",
   "00891":"中信關鍵半導體","00892":"富邦台灣半導體","006205":"富邦上証",
   "0052":"富邦科技","0053":"元大電子","00757":"統一FANG+","00646":"元大S&P500",
+  "00679B":"元大美債20年","00687B":"國泰20年美債","00696B":"富邦美債20年",
+  "00795B":"中信美國公債20年","00720B":"元大投資級公司債","00725B":"國泰投資級公司債",
+  "00751B":"元大AAA至A公司債","00761B":"國泰A級公司債","00772B":"中信高評級公司債",
+  "00773B":"中信優先金融債","00724B":"群益10年IG金融債","00933B":"國泰10Y+金融債",
+  "00937B":"群益ESG投等債20+","00948B":"中信優息投資級債","00953B":"群益優選非投等債",
+  "00968B":"元大優息投等債","00981B":"第一金優選非投債","00862B":"中信投資級公司債",
+  "00831B":"新光投等債15+","00945B":"凱基美國非投等債",
 };
 
 // ===== 設定（存 localStorage，不進 repo）=====
@@ -207,6 +214,17 @@ function App(){
                 <div className="divrow" key={i}>
                   <div><span className="code">{r.code}</span> <span className="nm">{r.name}</span></div>
                   <div className="nm num">{r.ex_date}（剩 {r.days_left} 天）約 {fmt(r.est)} 元</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {(result.recent||[]).length>0 && (
+            <div style={{marginTop:14}}>
+              <div className="nm" style={{marginBottom:6}}>🗓 最近一次除息</div>
+              {result.recent.map((r,i)=>(
+                <div className="divrow" key={i}>
+                  <div><span className="code">{r.code}</span> <span className="nm">{r.name}</span></div>
+                  <div className="nm num">{r.ex_date}｜每股 {r.cash_per_share} 元 → {fmt(r.total)} 元</div>
                 </div>
               ))}
             </div>

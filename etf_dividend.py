@@ -45,37 +45,42 @@ def roc_to_ad(roc_date):
     except ValueError:
         return None
 
-# ---------- 資料來源：TWSE 除權息預告 ----------
-def fetch_twse_dividends():
-    """
-    TWSE 除權除息計算結果表（TWT49U）含 ETF。
-    回傳 dict: code -> {ex_date(date), cash(float 元/股), name}
-    """
+# ---------- 資料來源：TWSE 上市除權息 ----------
+def _months_back(n):
+    """回傳最近 n 個月 + 下個月的 (year, month) 集合"""
     today = dt.date.today()
-    # 抓本月與下月，確保涵蓋即將除息與本月已除息
-    months = {(today.year, today.month)}
-    nxt = today.replace(day=1) + dt.timedelta(days=32)
+    months = set()
+    cur = today.replace(day=1)
+    for _ in range(n):
+        months.add((cur.year, cur.month))
+        cur = (cur - dt.timedelta(days=1)).replace(day=1)
+    nxt = (today.replace(day=1) + dt.timedelta(days=32)).replace(day=1)
     months.add((nxt.year, nxt.month))
-    prev = today.replace(day=1) - dt.timedelta(days=1)
-    months.add((prev.year, prev.month))
+    return months
 
-    result = {}
+def _merge_div(result, code, ex_date, cash, name):
+    """同一代號保留所有除息紀錄（list），之後再挑本月/未來/最近"""
+    if not code or not ex_date:
+        return
+    result.setdefault(code, {"name": name, "records": []})
+    if name and not result[code]["name"]:
+        result[code]["name"] = name
+    result[code]["records"].append({"ex_date": ex_date, "cash": cash})
+
+def fetch_twse_dividends(result, months):
+    """TWSE 除權除息計算結果表（TWT49U），上市 ETF/個股"""
     for y, m in months:
-        startDate = f"{y}{m:02d}01"
-        endDate = f"{y}{m:02d}31"
         url = ("https://www.twse.com.tw/rwd/zh/exRight/TWT49U?"
-               + urlencode({"startDate": startDate, "endDate": endDate,
-                            "response": "json"}))
+               + urlencode({"startDate": f"{y}{m:02d}01",
+                            "endDate": f"{y}{m:02d}31", "response": "json"}))
         try:
             data = fetch_json(url)
         except Exception as e:
-            print(f"[warn] 抓取 {y}/{m} 失敗: {e}", file=sys.stderr)
+            print(f"[warn] TWSE {y}/{m} 失敗: {e}", file=sys.stderr)
             continue
         if data.get("stat") != "OK":
             continue
-        fields = data.get("fields", [])
-        idx = {name: i for i, name in enumerate(fields)}
-        # 欄位名稱可能含全形空白，做寬鬆比對
+        idx = {name: i for i, name in enumerate(data.get("fields", []))}
         def col(row, *keys):
             for k in keys:
                 for fname, i in idx.items():
@@ -84,14 +89,44 @@ def fetch_twse_dividends():
             return ""
         for row in data.get("data", []):
             code = str(col(row, "股票代號", "代號")).strip()
-            if not code:
-                continue
             ex_date = roc_to_ad(col(row, "除權息日期", "資料日期", "除息日期"))
-            # 現金股利 = 權息前收盤 - 開始參考價，或直接取「現金股利」欄
             cash = to_float(col(row, "現金股利", "權值+息值", "息值"))
             name = str(col(row, "股票名稱", "名稱")).strip()
-            if ex_date:
-                result[code] = {"ex_date": ex_date, "cash": cash, "name": name}
+            _merge_div(result, code, ex_date, cash, name)
+
+def fetch_tpex_dividends(result, months):
+    """TPEx 櫃買除權息，債券 ETF（代號結尾 B）在此掛牌
+    端點：上櫃股票除權除息預告表 / 計算結果"""
+    for y, m in months:
+        roc_y = y - 1911
+        # 櫃買除權息 API（民國年月）
+        url = ("https://www.tpex.org.tw/www/zh-tw/bond/exDayAndStib?"
+               + urlencode({"date": f"{roc_y}/{m:02d}", "response": "json"}))
+        data = None
+        try:
+            data = fetch_json(url)
+        except Exception as e:
+            print(f"[warn] TPEx {y}/{m} 失敗: {e}", file=sys.stderr)
+        if not data:
+            continue
+        rows = data.get("aaData") or data.get("data") or []
+        for row in rows:
+            if not isinstance(row, (list, tuple)) or len(row) < 3:
+                continue
+            code = str(row[0]).strip()
+            ex_date = roc_to_ad(row[1]) if len(row) > 1 else None
+            cash = to_float(row[2]) if len(row) > 2 else 0.0
+            _merge_div(result, code, ex_date, cash, "")
+
+def fetch_dividends():
+    """合併 TWSE + TPEx，回傳 code -> {name, records:[{ex_date,cash}]}"""
+    months = _months_back(6)
+    result = {}
+    fetch_twse_dividends(result, months)
+    fetch_tpex_dividends(result, months)
+    # 每檔的 records 依日期排序
+    for code in result:
+        result[code]["records"].sort(key=lambda r: r["ex_date"])
     return result
 
 # ---------- 計算 ----------
@@ -99,35 +134,47 @@ def build_report(holdings, div_map):
     today = dt.date.today()
     cur_y, cur_m = today.year, today.month
 
-    this_month = []   # 本月已除息/除息中
+    this_month = []   # 本月已除息
     upcoming = []     # 未來即將除息
+    recent = []       # 每檔最近一次除息（不限本月）
 
     for h in holdings:
         code = str(h["code"])
         d = div_map.get(code)
-        if not d:
+        if not d or not d["records"]:
             continue
-        ex = d["ex_date"]
-        cash_per_share = d["cash"]
-        total = cash_per_share * h["shares"]
-        cost = h["avg_cost"] * h["shares"]
-        single_yield = (cash_per_share / h["avg_cost"] * 100) if h["avg_cost"] else 0
-        rec = {
-            "code": code, "name": h.get("name", d.get("name", "")),
-            "ex_date": ex, "cash_per_share": cash_per_share,
-            "shares": h["shares"], "total": total,
-            "single_yield": single_yield, "cost": cost,
-        }
-        if ex.year == cur_y and ex.month == cur_m and ex <= today:
-            this_month.append(rec)
-        elif ex > today:
-            upcoming.append(rec)
+        name = h.get("name") or d.get("name", "")
+        recs = d["records"]
+
+        # 最近一次「已發生」的除息
+        past = [r for r in recs if r["ex_date"] <= today]
+        if past:
+            last = past[-1]
+            recent.append({
+                "code": code, "name": name,
+                "ex_date": last["ex_date"],
+                "cash_per_share": last["cash"],
+                "total": last["cash"] * h["shares"],
+            })
+
+        for r in recs:
+            ex, cash = r["ex_date"], r["cash"]
+            total = cash * h["shares"]
+            sy = (cash / h["avg_cost"] * 100) if h["avg_cost"] else 0
+            rec = {"code": code, "name": name, "ex_date": ex,
+                   "cash_per_share": cash, "shares": h["shares"],
+                   "total": total, "single_yield": sy}
+            if ex.year == cur_y and ex.month == cur_m and ex <= today:
+                this_month.append(rec)
+            elif ex > today:
+                upcoming.append(rec)
 
     this_month.sort(key=lambda x: x["ex_date"])
     upcoming.sort(key=lambda x: x["ex_date"])
-    return this_month, upcoming
+    recent.sort(key=lambda x: x["code"])
+    return this_month, upcoming, recent
 
-def format_message(this_month, upcoming, holdings):
+def format_message(this_month, upcoming, recent, holdings):
     today = dt.date.today()
     lines = [f"📅 *ETF 配息追蹤* ({today:%Y/%m/%d})", ""]
 
@@ -158,6 +205,17 @@ def format_message(this_month, upcoming, holdings):
             )
     else:
         lines.append("🔔 近期無預告除息")
+
+    # 每檔最近一次除息
+    recent_map = {r["code"]: r for r in recent}
+    if recent:
+        lines.append("")
+        lines.append("🗓 *最近一次除息*")
+        for r in recent:
+            lines.append(
+                f"  {r['code']} {r['name']}｜{r['ex_date']:%Y/%m/%d}"
+                f"｜每股 {r['cash_per_share']:.3f} 元 → {r['total']:,.0f} 元"
+            )
 
     # 持股清單（無論有無配息都附上）
     if holdings:
@@ -194,7 +252,7 @@ def send_telegram(text):
         print("Telegram:", "OK" if resp.get("ok") else resp)
 
 # ---------- main ----------
-def write_result(this_month, upcoming):
+def write_result(this_month, upcoming, recent):
     """寫回 last_result.json 供網頁顯示"""
     today = dt.date.today()
     out = {
@@ -215,6 +273,13 @@ def write_result(this_month, upcoming):
              "est": round(r["cash_per_share"] * r["shares"])}
             for r in upcoming
         ],
+        "recent": [
+            {"code": r["code"], "name": r["name"],
+             "ex_date": f"{r['ex_date']:%Y/%m/%d}",
+             "cash_per_share": round(r["cash_per_share"], 3),
+             "total": round(r["total"])}
+            for r in recent
+        ],
     }
     (BASE / "last_result.json").write_text(
         json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -224,12 +289,12 @@ def main():
     holdings = json.loads(HOLDINGS_FILE.read_text(encoding="utf-8")).get("holdings", [])
     if not holdings:
         print("holdings.json 無持股資料"); return
-    div_map = fetch_twse_dividends()
+    div_map = fetch_dividends()
     print(f"取得除權息資料 {len(div_map)} 檔")
-    this_month, upcoming = build_report(holdings, div_map)
-    msg = format_message(this_month, upcoming, holdings)
+    this_month, upcoming, recent = build_report(holdings, div_map)
+    msg = format_message(this_month, upcoming, recent, holdings)
     send_telegram(msg)
-    write_result(this_month, upcoming)
+    write_result(this_month, upcoming, recent)
 
 if __name__ == "__main__":
     main()
